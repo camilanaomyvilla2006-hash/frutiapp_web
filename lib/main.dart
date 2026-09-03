@@ -1,7 +1,17 @@
 import 'package:flutter/material.dart';
+
 import 'package:http/http.dart' as http;
 
 import 'dart:convert';
+
+import 'models/access_record.dart';
+
+import 'services/preferences_service.dart';
+
+import 'services/json_service.dart';
+import 'package:web/web.dart' as web;
+
+import 'package:file_selector/file_selector.dart';
 
 void main() {
   runApp(const MyApp());
@@ -36,39 +46,122 @@ Future<List<dynamic>> cargarProductos() async {
 
   throw Exception('No se pudo cargar la información');
 }
+
 // stless crea un StatelessWidget
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
 
-class LoginPage extends StatelessWidget {
-  LoginPage({super.key});
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
 
+class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
+
+  final List<AccessRecord> _bitacora = [];
+
+  final TextEditingController _usuarioController = TextEditingController();
+
+  final TextEditingController _passwordController = TextEditingController();
+
+  final PreferencesService _preferencesService = PreferencesService();
+
+  bool _recordarme = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarUsuarioRecordado();
+  }
+
+  Future<void> _cargarUsuarioRecordado() async {
+    final usuario = await _preferencesService.obtenerUsuario();
+
+    if (usuario != null && usuario.isNotEmpty) {
+      setState(() {
+        _usuarioController.text = usuario;
+        _recordarme = true;
+      });
+    }
+  }
+
+  Future<void> _ingresar() async {
+  if (!_formKey.currentState!.validate()) {
+    return;
+  }
+
+  final usuario = _usuarioController.text.trim();
+  final password = _passwordController.text;
+
+  final exitoso = password == 'fruti123';
+
+  final registro = AccessRecord(
+    usuario: usuario,
+    fechaHora: DateTime.now(),
+    exitoso: exitoso,
+  );
+
+  _bitacora.add(registro);
+
+  if (!exitoso) {
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Credenciales incorrectas.'),
+      ),
+    );
+
+    return;
+  }
+
+  if (_recordarme) {
+    await _preferencesService.guardarUsuario(usuario);
+  } else {
+    await _preferencesService.eliminarUsuario();
+  }
+
+  if (!mounted) return;
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => HomePage(
+        bitacora: _bitacora,
+      ),
+    ),
+  );
+}
+
+  @override
+  void dispose() {
+    _usuarioController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 400),
+          constraints: const BoxConstraints(maxWidth: 400),
           child: Card(
-            // es un widget que nos permite presentar contenido dentro de una especie de tarjeta visual.
             child: Padding(
-              padding: EdgeInsets.all(20),
-              // Padding agrega espacio alrededor de un widget y utiliza EdgeInsets.all(20)
+              padding: const EdgeInsets.all(20),
               child: Form(
                 key: _formKey,
-
                 child: Column(
                   children: [
-                    /// children permite colocar varios widgets dentro del Column.
                     Text(
                       'FrutiApp',
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
+
                     TextFormField(
-                      // Es el campo donde el usuario puede escribir información.
-                      decoration: InputDecoration(
+                      controller: _usuarioController,
+                      decoration: const InputDecoration(
                         labelText: 'Correo electrónico',
-                        // labelText hace que aparezca el campo para escribir
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -76,41 +169,45 @@ class LoginPage extends StatelessWidget {
                         }
 
                         if (!value.contains('@') || !value.contains('.')) {
-                          return 'Correo no valido';
+                          return 'Correo no válido';
                         }
 
                         return null;
                       },
                     ),
-                    TextFormField(
-                      obscureText: true,
-                      // obscureText hace que cuando el usuario escriba la contraseña no se visualice ********
-                      decoration: InputDecoration(labelText: 'Contraseña'),
 
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Contraseña',
+                      ),
                       validator: (value) {
                         if (value == null || value.length < 6) {
                           return 'La contraseña debe tener al menos 6 caracteres';
                         }
+
                         return null;
                       },
                     ),
 
                     Row(
                       children: [
-                        Checkbox(value: false, onChanged: (value) {}),
-                        Text('Recordarme'),
+                        Checkbox(
+                          value: _recordarme,
+                          onChanged: (value) {
+                            setState(() {
+                              _recordarme = value ?? false;
+                            });
+                          },
+                        ),
+                        const Text('Recordarme'),
                       ],
                     ),
+
                     ElevatedButton(
-                      onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => HomePage()),
-                          );
-                        }
-                      },
-                      child: Text('Ingresar'),
+                      onPressed: _ingresar,
+                      child: const Text('Ingresar'),
                     ),
                   ],
                 ),
@@ -124,51 +221,101 @@ class LoginPage extends StatelessWidget {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final List<AccessRecord> bitacora;
+
+  const HomePage({super.key, required this.bitacora});
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
+ 
+  final JsonService _jsonService = JsonService();
+
+ void _exportarJson() {
+   final contenido = _jsonService.convertirAJson(widget.bitacora);
+
+  final bytes = utf8.encode(contenido);
+  final base64 = base64Encode(bytes);
+
+  web.HTMLAnchorElement()
+    ..href = 'data:application/json;base64,$base64'
+    ..setAttribute('download', 'bitacora_accesos.json')
+    ..click();
+}
+  Future<void> _importarJson() async {
+    const tipo = XTypeGroup(
+      label: 'JSON',
+      extensions: ['json'],
+      mimeTypes: ['application/json'],
+    );
+
+    final XFile? archivo = await openFile(acceptedTypeGroups: [tipo]);
+
+    if (archivo == null) {
+      return;
+    }
+
+    try {
+      final contenido = await archivo.readAsString();
+
+     final registros = _jsonService.convertirDesdeJson(contenido);
+
+      setState(() {
+        widget.bitacora.clear();
+        widget.bitacora.addAll(registros);
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('JSON importado correctamente.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El archivo JSON no es válido.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-   return Scaffold(
-  appBar: AppBar(
-    title: Text('FrutiApp'),
-  ),
-  body: FutureBuilder<List<dynamic>>(
-    future: cargarProductos(),
-    builder: (context, snapshot) {
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return Center(
-          child: CircularProgressIndicator(),
-        );
-      }
+    return Scaffold(
+      appBar: AppBar(
+  title: const Text('FrutiApp'),
+  actions: [
+    IconButton(
+      onPressed: _importarJson,
+      icon: const Icon(Icons.upload_file),
+      tooltip: 'Importar JSON',
+    ),
+    IconButton(
+      onPressed: _exportarJson,
+      icon: const Icon(Icons.download),
+      tooltip: 'Exportar JSON',
+    ),
+  ],
+),
+      body: widget.bitacora.isEmpty
+          ? const Center(child: Text('No hay registros de acceso.'))
+          : ListView.builder(
+              itemCount: widget.bitacora.length,
+              itemBuilder: (context, index) {
+                final registro = widget.bitacora[index];
 
-      if (snapshot.hasError) {
-        return Center(
-          child: Text('Error al cargar los datos'),
-        );
-      }
-
-      final productos = snapshot.data ?? [];
-
-      return ListView.builder(
-        itemCount: productos.length,
-        itemBuilder: (context, index) {
-          final producto = productos[index];
-
-          return ListTile(
-            title: Text(producto['title']),
-            subtitle: Text(
-              'Precio: ₡${producto['id'] * 100}',
+                return ListTile(
+                  leading: Icon(
+                    registro.exitoso ? Icons.check_circle : Icons.cancel,
+                  ),
+                  title: Text(registro.usuario),
+                  subtitle: Text(registro.fechaHora.toLocal().toString()),
+                  trailing: Text(registro.exitoso ? 'Exitoso' : 'Fallido'),
+                );
+              },
             ),
-          );
-        },
-      );
-    },
-  ),
-);
+    );
   }
 }
